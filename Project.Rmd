@@ -1,0 +1,135 @@
+---
+title: "Predicting Exercise Method"
+date: "Friday, March 20, 2015"
+output: html_document
+---
+
+##Overview
+The goal of this project is to predict the manner in which the people have done the exercise after training a model using the training data.
+
+##Read in the data
+We first download and read in the data.
+
+```{r, cache=TRUE, message=FALSE}
+library(caret)
+```
+```{r, cache=TRUE, message=FALSE}
+train_url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" 
+#download.file(train_url,destfile=".//pml-training.csv")
+
+test_url  = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+#download.file(test_url,destfile=".//pml-testing.csv")
+
+train = read.csv(".//pml-training.csv")
+test  = read.csv(".//pml-testing.csv")
+
+```
+
+##Data Cleansing
+To start with there are a possible 159 predictor variables in the dataset. On exploring the data it was found that there are a lot of variables with NA values and also lot of variables with mostly spaces. The folowing code identifies such variables and removes them from the dataset thus reducing the dimensions. After removing the sparse columns we get 52 predictors.
+
+```{r, cache=TRUE, message=FALSE}
+#Check nr. of predictors
+colnames = names(train)
+
+#Detect columns with NA's
+x=c()
+n = length(colnames)
+for (i in 1:n)
+{
+  t = summary(train[,i])
+  m = t["NA's"]
+  #if (!is.na(m)) {print(paste(i,"-", colnames[i], " NAs =", m)); x=c(x,i)}
+}
+
+#Since all of the columns containing NA's are sparce(19000+ records in each contain NA), remove them from the dataset
+train=train[,-c(1:7,x)]
+test=test[,-c(1:7,x)]
+
+#Detect columns with spaces
+colnames=names(train)
+x=c()
+n = length(colnames)
+for (i in 1:n)
+{
+  t = as.character(train[,i])
+  m = which(t == "")
+  #if (length(m)!=0) { x=c(x,i); print(paste(i,"-", colnames[i], " Spaces =", length(m)))}
+}
+
+#Since all of the columns containing spaces are sparce(19000+ records in each contain spaces), remove them from the dataset
+train=train[,-c(x)]
+test=test[,-c(x)]
+```
+
+##Model Creation
+The following models were tried and their findings are explained in the sections below:
+
+####Cartesian Tree
+Cartesian Tree on the entire dataset without any pre-processing gave poor predictive accuracy. Hence was rejected.
+```{r, cache=TRUE}
+modFit = train(classe~., method="rpart", data=train)
+confusionMatrix(train$classe,predict(modFit,newdata=train[,-53]))
+```
+
+####Pre-processing using PCA
+Principal Component Anaysis identified Principal components, but a tree model created using the PCA predictors had very poor predictive accuracy.
+PCA was tried at 100%, 99% and 95% threshold levels. But all gave poor predictive accuracy and hence this effort was rejected.
+
+```{r, cache=TRUE}
+prComp = prcomp(train[,-53])
+
+preProc = preProcess(train[,-53],method="pca", pcaComp=2)
+preProc
+trainPC = predict(preProc,train[,-53])
+trainPC = cbind(trainPC,classe=train[,53])
+modFit = train(classe~., method="rpart", data=trainPC)
+confusionMatrix(trainPC$classe,predict(modFit,newdata=trainPC[,-6]))
+```
+
+####Random Forest
+Random Forest was finally selected since it gave a predictive accurancy of 97%. Random Forest could not run successfully on my laptop for the entire data. It would error out after a while citing memory allocation issues. It ran successfully for 60% of the training data. The remainder of the training data was used to test the model.
+Models were created using ntree=5 and 10 since anything above 10 would take more than 1 hr and the laptop would get scaringly hot. With ntree=10, the model gave an accuracy rate around 97% and was accepted since I could not try for better values due to laptop limitations.
+
+```{r, cache=TRUE}
+#Splitting the training set into training and testing
+inTrain = createDataPartition(y=train$classe, p=0.6, list=FALSE)
+training = train[inTrain,]
+testing = train[-inTrain,]
+
+#Creating a random forest. Not running this again while report generation since it takes a long time. Just executing the final model in the section below
+#modFit = train(classe~., method="rf", data=training, ntree=10, prox=T)
+#Checking the confusion matrix
+#confusionMatrix(training$classe,predict(modFit,newdata=training[,-53]))
+```
+
+####Crossvalidation
+Default Bootstrap reSampling with 25 repeats provided a good accuracy rate of 97.7%. 
+
+5 fold crossvalidation with 5 repeats provided and accurance of 98.56%. 
+
+10 fold cross-validation with 10 repeats provided and accurance of 98.64%. Submitted the predictions using this model because it provided the highest accuracy. 
+
+Although the 10 fold cross-validation model did not provide a significant improvement in accuracy over the 5 fold model compared to the time it took to get generated, it gave a better accuracy compared to the bootstrap resampling cross-validation. 
+
+```{r, cache=TRUE, message=FALSE}
+#During report generation am running a 5 fold crossvalidation model since 10-fold model takes toooo long. The actual prediction was done with 10 fold cross-validation model.
+fitControl <- trainControl(## 5-fold CV
+  method = "repeatedcv",
+  number = 5,
+  ## repeated 5 times
+  repeats = 5)
+modFit = train(classe~., method="rf", data=training, trControl = fitControl, ntree=10, prox=T)
+```
+
+```{r}
+confusionMatrix(testing$classe,predict(modFit,newdata=testing[,-53]))
+```
+####Expected Out of Sample Error
+I expect the out of sample error to be less than 3% i.e on a sample of 20, I expect less than 1 to be wrong.FYI:I got 1 wrong when I predicted in first run. But in the 2nd run without any change of parameters it predicted correctly for the one that it had got wrong earlier. 
+
+####Predicted Output
+The predicted output is as follows:
+```{r, cache=TRUE}
+predict(modFit,newdata=test[,-53])
+```
